@@ -1,0 +1,22 @@
+# Dependencies (Matches root and all sub-folders)
+node_modules/
+
+# Production Build Outputs
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Secrets & Local Configurations (CRITICAL)
+.env
+.env*.local
+
+# Logs and Debugging
+*.log
+logs/
+
+# IDEs and System Files
+.vscode/
+.idea/
+.DS_Store
