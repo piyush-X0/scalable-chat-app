@@ -8,6 +8,17 @@ const socketRoom = new Map<WebSocket, string>();
 type ClientMsg = | { type: "join", payload: { roomId: string } }
     | { type: "chat", payload: { message: string } }
 
+function leaveRoom(ws: WebSocket) {
+    const roomId = socketRoom.get(ws);
+    if (!roomId) return;
+
+    const members = rooms.get(roomId);
+    if (members) {
+        members.delete(ws);
+        if (members.size === 0) rooms.delete(roomId);
+    }
+    socketRoom.delete(ws);
+}
 wss.on('connection', (ws) => {
     ws.on('error', console.error)
 
@@ -21,6 +32,7 @@ wss.on('connection', (ws) => {
 
         if (msg.type === "join") {
             const { roomId } = msg.payload;
+            leaveRoom(ws);
             if (!rooms.has(roomId)) rooms.set(roomId, new Set());
             rooms.get(roomId)!.add(ws);
             socketRoom.set(ws, roomId);
@@ -42,6 +54,7 @@ wss.on('connection', (ws) => {
             }
         }
         ws.on("close", () => {
+            leaveRoom(ws);
         })
     })
 });
