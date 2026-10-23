@@ -2,23 +2,41 @@ import { WebSocketServer, WebSocket } from 'ws';
 
 const wss = new WebSocketServer({ port: 8080 });
 
-const rooms = new Map<string, Set<WebSocket>>();
-const socketRoom = new Map<WebSocket, string>();
+interface Client { name: string, roomId: string };
 
-type ClientMsg = | { type: "join", payload: { roomId: string } }
-    | { type: "chat", payload: { message: string } }
+const rooms = new Map<string, Set<WebSocket>>();
+const clients = new Map<WebSocket, Client>();
+
+type ClientMsg = | { type: "join", payload: { roomId: string, name: string } }
+    | { type: "chat", payload: { message: string } };
+type ServerMsg = | { type: "chat", payload: { from: string, message: string } }
+    | { type: "system", payload: { message: string } };
 
 function leaveRoom(ws: WebSocket) {
-    const roomId = socketRoom.get(ws);
-    if (!roomId) return;
+    const client = clients.get(ws);
+    if (!client) return;
 
-    const members = rooms.get(roomId);
+    const members = rooms.get(client.roomId);
     if (members) {
         members.delete(ws);
-        if (members.size === 0) rooms.delete(roomId);
+        if (members.size === 0) rooms.delete(client.roomId);
+    } else {
+        broadCast(client.roomId, {
+            type: "system",
+            payload: { message: `${client.name} left` }
+        });
     }
-    socketRoom.delete(ws);
+    clients.delete(ws);
 }
+function broadCast(roomId: string, msg: ServerMsg) {
+    const members = rooms.get(roomId);
+    if (!members) return;
+    const out = JSON.stringify(msg);
+    for (const c of members) {
+        if (c.readyState === WebSocket.OPEN) c.send(out);
+    }
+}
+
 wss.on('connection', (ws) => {
     ws.on('error', console.error)
 
@@ -29,29 +47,34 @@ wss.on('connection', (ws) => {
         } catch {
             return;
         }
+        if (typeof msg !== "object" || msg === null) return;
 
         if (msg.type === "join") {
-            const { roomId } = msg.payload;
+            const roomId = msg.payload?.roomId;
+            const name = msg.payload?.name;
+            if (typeof roomId !== "string" || typeof name !== "string") return;
+            const cleanName = name.trim();
+            if (!roomId.trim() || !cleanName || cleanName.length > 20) return;
+
             leaveRoom(ws);
             if (!rooms.has(roomId)) rooms.set(roomId, new Set());
-            rooms.get(roomId)!.add(ws);
-            socketRoom.set(ws, roomId);
+            rooms.get(roomId)?.add(ws);
+            clients.set(ws, { name: cleanName, roomId });
+
+            broadCast(roomId, {
+                type: "system",
+                payload: { message: `${cleanName} joined` }
+            });
         }
         if (msg.type === "chat") {
-            const roomId = socketRoom.get(ws);
-            if (!roomId) return;
-            const members = rooms.get(roomId);
-            if (!members) return;
-
-            const out = JSON.stringify({
+            const client = clients.get(ws);
+            if (!client) return;
+            const text = msg.payload?.message;
+            if (text !== "string" || !text.trim() || text.length > 500) return;
+            broadCast(client.roomId, {
                 type: "chat",
-                payload: {
-                    message: msg.payload.message
-                }
-            });
-            for (const client of members) {
-                if (client.readyState === WebSocket.OPEN) client.send(out);
-            }
+                payload: { from: client.name, message: text }
+            })
         }
         ws.on("close", () => {
             leaveRoom(ws);
