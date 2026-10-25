@@ -1,4 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import { ClientMsgSchema } from './validation';
+import z, { ZodAny } from 'zod';
 
 const wss = new WebSocketServer({ port: 8080 });
 
@@ -8,11 +10,12 @@ const rooms = new Map<string, Set<WebSocket>>();
 const clients = new Map<WebSocket, Client>();
 const alive = new Set<WebSocket>();
 
-type ClientMsg = | { type: "join", payload: { roomId: string, name: string } }
-    | { type: "chat", payload: { message: string } };
+type ClientMsg = z.infer<typeof ClientMsgSchema>;
+
 type ServerMsg = | { type: "chat", payload: { from: string, message: string } }
     | { type: "system", payload: { message: string } }
-    | { type: "users", payload: { users: string[] } };
+    | { type: "users", payload: { users: string[] } }
+    | { type: "error", payload: { message: string } };
 
 function leaveRoom(ws: WebSocket) {
     const client = clients.get(ws);
@@ -56,44 +59,47 @@ wss.on('connection', (ws) => {
     ws.on("pong", () => alive.add(ws));
 
     ws.on("message", (data) => {
-        let msg: ClientMsg;
+        let raw: unknown;
         try {
-            msg = JSON.parse(data.toString());
+            raw = JSON.parse(data.toString());
         } catch {
+            ws.send(JSON.stringify({ type: "error", payload: { message: "invaild JSON" } }));
             return;
         }
-        if (typeof msg !== "object" || msg === null) return;
+        const parsed = ClientMsgSchema.safeParse(raw);
+
+        if (!parsed.success) {
+            ws.send(JSON.stringify({ type: "error", payload: { message: "invalid message" } }));
+            return;
+        }
+        const msg = parsed.data;
 
         if (msg.type === "join") {
-            const roomId = msg.payload?.roomId;
-            const name = msg.payload?.name;
-            if (typeof roomId !== "string" || typeof name !== "string") return;
-            const cleanName = name.trim();
-            if (!roomId.trim() || !cleanName || cleanName.length > 20) return;
+            const { roomId, name } = msg.payload;
             if (clients.get(ws)?.roomId === roomId) return;
 
             leaveRoom(ws);
             if (!rooms.has(roomId)) rooms.set(roomId, new Set());
             rooms.get(roomId)?.add(ws);
-            clients.set(ws, { name: cleanName, roomId });
+            clients.set(ws, { name, roomId });
 
             broadCast(roomId, {
                 type: "system",
-                payload: { message: `${cleanName} joined` }
+                payload: { message: `${name} joined` }
             });
             sendUsers(roomId);
         }
         if (msg.type === "chat") {
             const client = clients.get(ws);
-            if (!client) return;
-            const text = msg.payload?.message;
-            if (typeof text !== "string" || !text.trim() || text.length > 500) return;
+            if (!client) {
+                ws.send(JSON.stringify({ type: "error", payload: { message: "join a room first" } }));
+                return;
+            };
             broadCast(client.roomId, {
                 type: "chat",
-                payload: { from: client.name, message: text }
+                payload: { from: client.name, message: msg.payload.message }
             })
         }
-
     })
     ws.on("close", () => {
         alive.delete(ws);
