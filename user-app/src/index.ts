@@ -1,16 +1,13 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientMsgSchema } from './validation';
-import z, { ZodAny } from 'zod';
 
-const wss = new WebSocketServer({ port: 8080 });
+const wss = new WebSocketServer({ port: 8080, maxPayload: 4 * 1024 });
 
 interface Client { name: string, roomId: string };
 
 const rooms = new Map<string, Set<WebSocket>>();
 const clients = new Map<WebSocket, Client>();
 const alive = new Set<WebSocket>();
-
-type ClientMsg = z.infer<typeof ClientMsgSchema>;
 
 type ServerMsg = | { type: "chat", payload: { from: string, message: string } }
     | { type: "system", payload: { message: string } }
@@ -69,7 +66,12 @@ wss.on('connection', (ws) => {
         const parsed = ClientMsgSchema.safeParse(raw);
 
         if (!parsed.success) {
-            ws.send(JSON.stringify({ type: "error", payload: { message: "invalid message" } }));
+            const issue = parsed.error.issues[0];
+            const field = issue?.path.join(".") ?? "message";
+            ws.send(JSON.stringify({
+                type: "error",
+                payload: { message: `${field}: ${issue?.message ?? "invalid"}` },
+            }));
             return;
         }
         const msg = parsed.data;
