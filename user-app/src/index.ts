@@ -25,26 +25,22 @@ function leaveRoom(ws: WebSocket) {
     const members = rooms.get(client.roomId);
     if (members) {
         members.delete(ws);
+        broadCast(client.roomId, {
+            type: "system",
+            payload: { message: `${client.name} left` }
+        });
         if (members.size === 0) {
             rooms.delete(client.roomId);
+            sub.unsubscribe(`room:${client.roomId}`);
         }
         else {
-            broadCast(client.roomId, {
-                type: "system",
-                payload: { message: `${client.name} left` }
-            });
             sendUsers(client.roomId);
         }
     }
     clients.delete(ws);
 }
 function broadCast(roomId: string, msg: ServerMsg) {
-    const members = rooms.get(roomId);
-    if (!members) return;
-    const out = JSON.stringify(msg);
-    for (const c of members) {
-        if (c.readyState === WebSocket.OPEN) c.send(out);
-    }
+    pub.publish(`room:${roomId}`, JSON.stringify(msg));
 }
 function sendUsers(roomId: string) {
     const members = rooms.get(roomId);
@@ -68,7 +64,7 @@ wss.on('connection', (ws) => {
     alive.add(ws);
     ws.on("pong", () => alive.add(ws));
 
-    ws.on("message", (data) => {
+    ws.on("message", async (data) => {
         let raw: unknown;
         try {
             raw = JSON.parse(data.toString());
@@ -94,7 +90,10 @@ wss.on('connection', (ws) => {
             if (clients.get(ws)?.roomId === roomId) return;
 
             leaveRoom(ws);
-            if (!rooms.has(roomId)) rooms.set(roomId, new Set());
+            if (!rooms.has(roomId)) {
+                rooms.set(roomId, new Set())
+                await sub.subscribe(`room:${roomId}`);
+            }
             rooms.get(roomId)?.add(ws);
             clients.set(ws, { name, roomId });
 
