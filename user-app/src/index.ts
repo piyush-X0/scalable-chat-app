@@ -1,10 +1,14 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientMsgSchema } from './validation';
+import Redis from 'ioredis';
 
 const wss = new WebSocketServer({ port: 8080, maxPayload: 4 * 1024 });
+const pub = new Redis({ host: "127.0.0.1", port: 6379 });
+const sub = new Redis({ host: "127.0.0.1", port: 6379 });
+pub.on("error", (e) => console.error("pub error:", e.message));
+sub.on("error", (e) => console.error("sub error:", e.message));
 
 interface Client { name: string, roomId: string };
-
 const rooms = new Map<string, Set<WebSocket>>();
 const clients = new Map<WebSocket, Client>();
 const alive = new Set<WebSocket>();
@@ -48,6 +52,15 @@ function sendUsers(roomId: string) {
     const users = Array.from(members, (s) => clients.get(s)?.name ?? "?");
     broadCast(roomId, { type: "users", payload: { users } });
 }
+
+sub.on("message", (channel, message) => {
+    const roomId = channel.slice("room:".length);
+    const members = rooms.get(roomId);
+    if (!members) return;
+    for (const c of members) {
+        if (c.readyState === WebSocket.OPEN) c.send(message);
+    }
+});
 
 wss.on('connection', (ws) => {
     ws.on('error', console.error)
