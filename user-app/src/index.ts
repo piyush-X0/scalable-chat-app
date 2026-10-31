@@ -38,19 +38,15 @@ function leaveRoom(ws: WebSocket) {
             rooms.delete(client.roomId);
             sub.unsubscribe(`room:${client.roomId}`);
         }
-        else {
-            sendUsers(client.roomId);
-        }
     }
+    sendUsers(client.roomId);
     clients.delete(ws);
 }
 function broadCast(roomId: string, msg: ServerMsg) {
     pub.publish(`room:${roomId}`, JSON.stringify(msg));
 }
-function sendUsers(roomId: string) {
-    const members = rooms.get(roomId);
-    if (!members) return;
-    const users = Array.from(members, (s) => clients.get(s)?.name ?? "?");
+async function sendUsers(roomId: string) {
+    const users = await pub.hvals(`users:${roomId}`);
     broadCast(roomId, { type: "users", payload: { users } });
 }
 
