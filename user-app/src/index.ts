@@ -1,6 +1,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { ClientMsgSchema } from './validation';
 import Redis from 'ioredis';
+import { randomUUID } from 'crypto';
 
 const PORT = Number(process.env.PORT) || 8080;
 const wss = new WebSocketServer({ port: PORT, maxPayload: 4 * 1024 });
@@ -11,7 +12,7 @@ const sub = new Redis({ host: "127.0.0.1", port: 6379 });
 pub.on("error", (e) => console.error("pub error:", e.message));
 sub.on("error", (e) => console.error("sub error:", e.message));
 
-interface Client { name: string, roomId: string };
+interface Client { id: string, name: string, roomId: string };
 const rooms = new Map<string, Set<WebSocket>>();
 const clients = new Map<WebSocket, Client>();
 const alive = new Set<WebSocket>();
@@ -62,6 +63,7 @@ sub.on("message", (channel, message) => {
 });
 
 wss.on('connection', (ws) => {
+    const id = randomUUID();
     ws.on('error', console.error)
 
     alive.add(ws);
@@ -98,7 +100,7 @@ wss.on('connection', (ws) => {
                 await sub.subscribe(`room:${roomId}`);
             }
             rooms.get(roomId)?.add(ws);
-            clients.set(ws, { name, roomId });
+            clients.set(ws, { id, name, roomId });
 
             broadCast(roomId, {
                 type: "system",
