@@ -25,6 +25,7 @@ type ServerMsg = | { type: "chat", payload: { from: string, message: string } }
 function leaveRoom(ws: WebSocket) {
     const client = clients.get(ws);
     if (!client) return;
+    pub.hdel(`users:${client.roomId}`, client.id);
 
     const members = rooms.get(client.roomId);
     if (members) {
@@ -101,6 +102,7 @@ wss.on('connection', (ws) => {
             }
             rooms.get(roomId)?.add(ws);
             clients.set(ws, { id, name, roomId });
+            await pub.hset(`users:${roomId}`, id, name)
 
             broadCast(roomId, {
                 type: "system",
