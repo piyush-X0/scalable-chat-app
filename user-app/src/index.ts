@@ -43,11 +43,17 @@ function leaveRoom(ws: WebSocket) {
     clients.delete(ws);
 }
 function broadCast(roomId: string, msg: ServerMsg) {
-    pub.publish(`room:${roomId}`, JSON.stringify(msg));
+    pub.publish(`room:${roomId}`, JSON.stringify(msg))
+        .catch((e) => console.error("publish failed :", e.message));
 }
 async function sendUsers(roomId: string) {
-    const users = await pub.hvals(`users:${roomId}`);
-    broadCast(roomId, { type: "users", payload: { users } });
+    try {
+        const users = await pub.hvals(`users:${roomId}`);
+        broadCast(roomId, { type: "users", payload: { users } });
+    }
+    catch (e) {
+        console.error("sendUsers failed :", e);
+    }
 }
 
 sub.on("message", (channel, message) => {
@@ -70,8 +76,9 @@ wss.on('connection', (ws) => {
         let raw: unknown;
         try {
             raw = JSON.parse(data.toString());
-        } catch {
-            ws.send(JSON.stringify({ type: "error", payload: { message: "invaild JSON" } }));
+        } catch (e) {
+            console.error("message handler failed :", e);
+            ws.send(JSON.stringify({ type: "error", payload: { message: "invalid JSON" } }));
             return;
         }
         const parsed = ClientMsgSchema.safeParse(raw);
@@ -138,10 +145,11 @@ const sweeper = setInterval(() => {
 }, 30_000);
 const renewer = setInterval(() => {
     for (const c of clients.values()) {
-        pub.hexpire(`users:${c.roomId}`, 30, "FIELDS", 1, c.id);
+        pub.hexpire(`users:${c.roomId}`, 30, "FIELDS", 1, c.id)
+            .catch((e) => console.error("renew failed :", e.message));
     }
 }, 10_000);
 wss.on("close", () => {
     clearInterval(sweeper);
-    clearInterval(renewer)
+    clearInterval(renewer);
 });
