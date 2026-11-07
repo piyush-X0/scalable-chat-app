@@ -99,6 +99,7 @@ wss.on('connection', (ws) => {
             rooms.get(roomId)?.add(ws);
             clients.set(ws, { id, name, roomId });
             await pub.hset(`users:${roomId}`, id, name)
+            await pub.hexpire(`users:${roomId}`, 30, "FIELDS", 1, id);
 
             broadCast(roomId, {
                 type: "system",
@@ -135,4 +136,12 @@ const sweeper = setInterval(() => {
         ws.ping();
     }
 }, 30_000);
-wss.on("close", () => clearInterval(sweeper));
+const renewer = setInterval(() => {
+    for (const c of clients.values()) {
+        pub.hexpire(`users:${c.roomId}`, 30, "FIELDS", 1, c.id);
+    }
+}, 10_000);
+wss.on("close", () => {
+    clearInterval(sweeper);
+    clearInterval(renewer)
+});
