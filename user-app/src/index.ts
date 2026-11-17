@@ -25,7 +25,8 @@ type ServerMsg = | { type: "chat", payload: { from: string, message: string } }
 function leaveRoom(ws: WebSocket) {
     const client = clients.get(ws);
     if (!client) return;
-    pub.hdel(`users:${client.roomId}`, client.id);
+    pub.hdel(`users:${client.roomId}`, client.id)
+        .catch((e) => console.error("hdel failed:", e.message))
 
     const members = rooms.get(client.roomId);
     if (members) {
@@ -36,7 +37,8 @@ function leaveRoom(ws: WebSocket) {
         });
         if (members.size === 0) {
             rooms.delete(client.roomId);
-            sub.unsubscribe(`room:${client.roomId}`);
+            sub.unsubscribe(`room:${client.roomId}`)
+                .catch((e) => console.error("unsubscribe failed:", e.message))
         }
     }
     sendUsers(client.roomId);
@@ -73,57 +75,63 @@ wss.on('connection', (ws) => {
     ws.on("pong", () => alive.add(ws));
 
     ws.on("message", async (data) => {
-        let raw: unknown;
         try {
-            raw = JSON.parse(data.toString());
+
+            let raw: unknown;
+
+            try {
+                raw = JSON.parse(data.toString());
+            } catch (e) {
+                ws.send(JSON.stringify({ type: "error", payload: { message: "invalid JSON" } }));
+                return;
+            }
+            const parsed = ClientMsgSchema.safeParse(raw);
+
+            if (!parsed.success) {
+                const issue = parsed.error.issues[0];
+                const field = issue?.path.join(".") ?? "message";
+                ws.send(JSON.stringify({
+                    type: "error",
+                    payload: { message: `${field}: ${issue?.message ?? "invalid"}` },
+                }));
+                return;
+            }
+            const msg = parsed.data;
+
+            if (msg.type === "join") {
+                const { roomId, name } = msg.payload;
+                if (clients.get(ws)?.roomId === roomId) return;
+
+                leaveRoom(ws);
+                if (!rooms.has(roomId)) {
+                    await sub.subscribe(`room:${roomId}`);
+                    rooms.set(roomId, new Set())
+                }
+                rooms.get(roomId)?.add(ws);
+                clients.set(ws, { id, name, roomId });
+                await pub.hset(`users:${roomId}`, id, name)
+                await pub.hexpire(`users:${roomId}`, 30, "FIELDS", 1, id);
+
+                broadCast(roomId, {
+                    type: "system",
+                    payload: { message: `${name} joined` }
+                });
+                sendUsers(roomId);
+            }
+            if (msg.type === "chat") {
+                const client = clients.get(ws);
+                if (!client) {
+                    ws.send(JSON.stringify({ type: "error", payload: { message: "join a room first" } }));
+                    return;
+                };
+                broadCast(client.roomId, {
+                    type: "chat",
+                    payload: { from: client.name, message: msg.payload.message }
+                })
+            }
         } catch (e) {
             console.error("message handler failed :", e);
-            ws.send(JSON.stringify({ type: "error", payload: { message: "invalid JSON" } }));
-            return;
-        }
-        const parsed = ClientMsgSchema.safeParse(raw);
-
-        if (!parsed.success) {
-            const issue = parsed.error.issues[0];
-            const field = issue?.path.join(".") ?? "message";
-            ws.send(JSON.stringify({
-                type: "error",
-                payload: { message: `${field}: ${issue?.message ?? "invalid"}` },
-            }));
-            return;
-        }
-        const msg = parsed.data;
-
-        if (msg.type === "join") {
-            const { roomId, name } = msg.payload;
-            if (clients.get(ws)?.roomId === roomId) return;
-
-            leaveRoom(ws);
-            if (!rooms.has(roomId)) {
-                rooms.set(roomId, new Set())
-                await sub.subscribe(`room:${roomId}`);
-            }
-            rooms.get(roomId)?.add(ws);
-            clients.set(ws, { id, name, roomId });
-            await pub.hset(`users:${roomId}`, id, name)
-            await pub.hexpire(`users:${roomId}`, 30, "FIELDS", 1, id);
-
-            broadCast(roomId, {
-                type: "system",
-                payload: { message: `${name} joined` }
-            });
-            sendUsers(roomId);
-        }
-        if (msg.type === "chat") {
-            const client = clients.get(ws);
-            if (!client) {
-                ws.send(JSON.stringify({ type: "error", payload: { message: "join a room first" } }));
-                return;
-            };
-            broadCast(client.roomId, {
-                type: "chat",
-                payload: { from: client.name, message: msg.payload.message }
-            })
+            ws.send(JSON.stringify({ type: "error", payload: { message: "server error" } }));
         }
     })
     ws.on("close", () => {
