@@ -44,6 +44,12 @@ function leaveRoom(ws: WebSocket) {
     sendUsers(client.roomId);
     clients.delete(ws);
 }
+function saveChat(roomId: string, msg: ServerMsg) {
+    const key = `history:${roomId}`
+    pub.lpush(key, JSON.stringify(msg))
+        .then(() => pub.ltrim(key, 0, 49))
+        .catch((e) => console.error("saveChat failed:", e.message))
+}
 function broadCast(roomId: string, msg: ServerMsg) {
     pub.publish(`room:${roomId}`, JSON.stringify(msg))
         .catch((e) => console.error("publish failed :", e.message));
@@ -124,10 +130,12 @@ wss.on('connection', (ws) => {
                     ws.send(JSON.stringify({ type: "error", payload: { message: "join a room first" } }));
                     return;
                 };
-                broadCast(client.roomId, {
+                const out: ServerMsg = {
                     type: "chat",
                     payload: { from: client.name, message: msg.payload.message }
-                })
+                }
+                broadCast(client.roomId, out);
+                saveChat(client.roomId, out);
             }
         } catch (e) {
             console.error("message handler failed :", e);
