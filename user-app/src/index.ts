@@ -118,6 +118,11 @@ wss.on('connection', (ws) => {
                 await pub.hset(`users:${roomId}`, id, name)
                 await pub.hexpire(`users:${roomId}`, 30, "FIELDS", 1, id);
 
+                const past = await pub.lrange(`history:${roomId}`, 0, -1);
+                for (const m of past.reverse()) {
+                    if (ws.readyState === WebSocket.OPEN) ws.send(m);
+                }
+
                 broadCast(roomId, {
                     type: "system",
                     payload: { message: `${name} joined` }
