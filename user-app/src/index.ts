@@ -7,8 +7,12 @@ const PORT = Number(process.env.PORT) || 8080;
 const wss = new WebSocketServer({ port: PORT, maxPayload: 4 * 1024 });
 console.log(`ws server is listening on PORT ${PORT}`);
 
-const pub = new Redis({ host: "127.0.0.1", port: 6379 });
-const sub = new Redis({ host: "127.0.0.1", port: 6379 });
+const REDIS_HOST = process.env.REDIS_HOST || "127.0.0.1";
+const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
+
+const pub = new Redis({ host: REDIS_HOST, port: REDIS_PORT });
+const sub = new Redis({ host: REDIS_HOST, port: REDIS_PORT });
+
 pub.on("error", (e) => console.error("pub error:", e.message));
 sub.on("error", (e) => console.error("sub error:", e.message));
 
@@ -74,6 +78,7 @@ sub.on("message", (channel, message) => {
 });
 
 wss.on('connection', (ws) => {
+    console.log(`[${PORT}] new connection`);
     const id = randomUUID();
     ws.on('error', console.error)
 
