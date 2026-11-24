@@ -77,6 +77,20 @@ sub.on("message", (channel, message) => {
     }
 });
 
+const LIMIT = 5;
+const WINDOW_MS = 3000;
+const rate = new Map<WebSocket, { count: number, resetAt: number }>();
+function allow(ws: WebSocket): boolean {
+    const now = Date.now();
+    const r = rate.get(ws);
+    if (!r || now >= r.resetAt) {
+        rate.set(ws, { count: 1, resetAt: now + WINDOW_MS });
+        return true;
+    }
+    r.count++;
+    return r.count <= LIMIT;
+}
+
 wss.on('connection', (ws) => {
     console.log(`[${PORT}] new connection`);
     const id = randomUUID();
@@ -91,6 +105,11 @@ wss.on('connection', (ws) => {
             let raw: unknown;
 
             try {
+                if (!allow(ws)) {
+                    ws.send(JSON.stringify({ type: "error", payload: { message: "slow down" } }));
+                    console.log(`slow down`);
+                    return;
+                }
                 raw = JSON.parse(data.toString());
             } catch (e) {
                 ws.send(JSON.stringify({ type: "error", payload: { message: "invalid JSON" } }));
@@ -154,6 +173,7 @@ wss.on('connection', (ws) => {
     })
     ws.on("close", () => {
         alive.delete(ws);
+        rate.delete(ws);
         leaveRoom(ws);
     });
 });
